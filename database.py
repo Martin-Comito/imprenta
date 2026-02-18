@@ -29,7 +29,16 @@ def guardar_producto(nombre, cantidad, precio, categoria):
     supabase.table('productos').insert(datos).execute()
 
 def borrar_producto(id_producto):
-    supabase.table('productos').delete().eq('id', id_producto).execute()
+        supabase.table('productos').update(datos).eq('id', id_prod).execute()
+def actualizar_producto(id_prod, nombre, cantidad, precio, categoria):
+    """Actualiza los datos de un producto existente."""
+    datos = {
+        "nombre": nombre,
+        "cantidad": cantidad,
+        "precio": precio,
+        "categoria": categoria
+    }
+    supabase.table('productos').update(datos).eq('id', id_prod).execute()
 
 # --- FUNCIONES DE PEDIDOS ---
 def obtener_pedidos(estado_filtro=None):
@@ -81,4 +90,5 @@ def registrar_movimiento_caja(tipo, categoria, monto, nota, pedido_id=None):
         "nota": nota, 
         "pedido_id": pedido_id
     }
+
     supabase.table('caja').insert(datos).execute()
