@@ -3,15 +3,22 @@ import database as db
 
 st.set_page_config(page_title="Imprenta Cloud", layout="wide", page_icon="☁️")
 
+# --- CABECERA ---
 col_titulo, col_hora = st.columns([3, 1])
 with col_titulo:
     st.title("☁️ Gestión de Imprenta")
 with col_hora:
     st.metric("Fecha", db.get_hora_argentina().split(" ")[0])
 
-menu = st.sidebar.radio("Menú", ["💰 Lista de Precios", "📝 Nuevo Pedido", "📦 Gestión de Pedidos", "📊 Caja y Movimientos"])
+# --- MENÚ LATERAL---
+menu = st.sidebar.radio(
+    "Menú Principal", 
+    ["💰 Lista de Precios", "📝 Nuevo Pedido", "💸 Registrar Gasto", "📦 Gestión de Pedidos", "📊 Caja y Movimientos"]
+)
 
-# --- 1. PRECIOS ---
+# ==========================================
+# 1. LISTA DE PRECIOS
+# ==========================================
 if menu == "💰 Lista de Precios":
     st.header("Lista de Precios")
     col1, col2 = st.columns([1, 2])
@@ -34,7 +41,9 @@ if menu == "💰 Lista de Precios":
                 db.borrar_producto(id_borrar)
                 st.rerun()
 
-# --- 2. NUEVO PEDIDO ---
+# ==========================================
+# 2. NUEVO PEDIDO
+# ==========================================
 elif menu == "📝 Nuevo Pedido":
     st.header("Cargar Pedido")
     df_prod = db.obtener_productos()
@@ -57,7 +66,39 @@ elif menu == "📝 Nuevo Pedido":
             else:
                 st.error("Falta cliente")
 
-# --- 3. GESTIÓN PEDIDOS ---
+# ==========================================
+# 3. REGISTRAR GASTO (NUEVO MÓDULO)
+# ==========================================
+elif menu == "💸 Registrar Gasto":
+    st.header("💸 Registrar Salida de Dinero")
+    st.info("Ingresá acá cualquier gasto del día (Luz, Insumos, Delivery, etc).")
+    
+    with st.form("form_gasto"):
+        col_cat, col_monto = st.columns(2)
+        with col_cat:
+            categoria = st.selectbox("Categoría del Gasto", [
+                "Insumos (Papel/Tinta)", 
+                "Mantenimiento de Máquinas", 
+                "Servicios (Luz/Internet)", 
+                "Logística/Envíos", 
+                "Retiro de Ganancia",
+                "Varios"
+            ])
+        with col_monto:
+            monto = st.number_input("Monto gastado ($)", min_value=0.0, step=100.0)
+        
+        nota = st.text_area("Descripción / Detalle (Opcional)", placeholder="Ej: Compra de 5 resmas A4 Ledesma")
+        
+        if st.form_submit_button("🔴 Registrar Gasto"):
+            if monto > 0:
+                db.registrar_movimiento_caja("Egreso", categoria, monto, nota)
+                st.success(f"Gasto de ${monto} registrado correctamente.")
+            else:
+                st.error("El monto tiene que ser mayor a 0.")
+
+# ==========================================
+# 4. GESTIÓN PEDIDOS
+# ==========================================
 elif menu == "📦 Gestión de Pedidos":
     st.header("Control de Trabajos")
     filtro = st.radio("Ver:", ["Todos", "Pendientes", "Entregados"], horizontal=True)
@@ -86,31 +127,31 @@ elif menu == "📦 Gestión de Pedidos":
                     db.actualizar_estado_pedido(sel_id, nuevo_est)
                     st.rerun()
 
-# --- 4. CAJA ---
+# ==========================================
+# 5. CAJA
+# ==========================================
 elif menu == "📊 Caja y Movimientos":
     st.header("Flujo de Caja")
     periodo = st.radio("Ver:", ["Hoy", "Todo"])
     df = db.obtener_caja()
     
     if not df.empty:
-        # Filtro simple en Python
+        # Filtro simple
         fecha_hoy = db.get_hora_argentina().split(" ")[0]
         if periodo == "Hoy":
             df = df[df['fecha'].str.contains(fecha_hoy)]
             
         ingresos = df[df['tipo'] == 'Ingreso']['monto'].sum()
         egresos = df[df['tipo'] == 'Egreso']['monto'].sum()
+        balance = ingresos - egresos
         
         c1, c2, c3 = st.columns(3)
-        c1.metric("Ingresos", f"${ingresos:,.2f}")
-        c2.metric("Egresos", f"${egresos:,.2f}")
-        c3.metric("Balance", f"${ingresos - egresos:,.2f}")
+        c1.metric("Ingresos (+)", f"${ingresos:,.2f}")
+        c2.metric("Egresos (-)", f"${egresos:,.2f}", delta_color="inverse")
+        c3.metric("Balance", f"${balance:,.2f}", delta=balance)
         
-        st.dataframe(df, use_container_width=True)
-    
-    with st.expander("Registrar Gasto Manual"):
-        monto = st.number_input("Monto Gasto", 0.0)
-        nota = st.text_input("Detalle")
-        if st.button("Registrar Salida"):
-            db.registrar_movimiento_caja("Egreso", "Gasto General", monto, nota)
-            st.rerun()
+        st.divider()
+        st.markdown("### 📝 Detalle de Movimientos")
+        st.dataframe(df[["fecha", "tipo", "categoria", "nota", "monto"]], use_container_width=True)
+    else:
+        st.info("No hay movimientos registrados.")
