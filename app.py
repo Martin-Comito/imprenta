@@ -262,7 +262,7 @@ elif menu == "📦 Gestión de Pedidos":
     else:
         st.info("No hay pedidos con este filtro.")
 # ==========================================
-# 5. CAJA Y MOVIMIENTOS (MEJORADO)
+# 5. CAJA Y MOVIMIENTOS (EDITABLE)
 # ==========================================
 elif menu == "📊 Caja y Movimientos":
     st.header("📊 Reporte de Ganancias y Movimientos")
@@ -271,20 +271,19 @@ elif menu == "📊 Caja y Movimientos":
     df = db.obtener_caja()
     
     if not df.empty:
-        # Convertimos la columna de texto a formato Fecha real para poder filtrar
+        # Convertimos fechas
         df['fecha_dt'] = pd.to_datetime(df['fecha'])
-        df['fecha_solo'] = df['fecha_dt'].dt.date 
+        df['fecha_solo'] = df['fecha_dt'].dt.date
 
-        # --- 2. FILTROS DE FECHA ---
+        # --- 2. FILTROS ---
         col_filtro, col_rango = st.columns([1, 2])
-        
         with col_filtro:
             opcion_tiempo = st.selectbox(
                 "Seleccionar Período:", 
                 ["Hoy", "Últimos 7 Días", "Este Mes", "Rango Personalizado"]
             )
 
-        # Definimos las fechas de inicio y fin según la opción
+        # Lógica de fechas (Igual que antes)
         hoy = datetime.now().date()
         fecha_inicio = hoy
         fecha_fin = hoy
@@ -305,48 +304,80 @@ elif menu == "📊 Caja y Movimientos":
                     fecha_inicio, fecha_fin = rango
 
         # --- 3. APLICAR FILTRO ---
-        # Filtra el DataFrame "df" usando las fechas elegidas
         mask = (df['fecha_solo'] >= fecha_inicio) & (df['fecha_solo'] <= fecha_fin)
-        df_filtrado = df.loc[mask]
+        df_filtrado = df.loc[mask].copy() 
 
-        # --- 4. CÁLCULOS DEL PERÍODO ---
+        # --- 4. MOSTRAR MÉTRICAS ---
         if not df_filtrado.empty:
             ingresos = df_filtrado[df_filtrado['tipo'] == 'Ingreso']['monto'].sum()
             egresos = df_filtrado[df_filtrado['tipo'] == 'Egreso']['monto'].sum()
             balance = ingresos - egresos
             
-            # --- MOSTRAR MÉTRICAS ARRIBA ---
             st.markdown(f"### 📅 Viendo desde: {fecha_inicio} hasta {fecha_fin}")
             kpi1, kpi2, kpi3 = st.columns(3)
-            kpi1.metric("Ingresos (Ventas/Señas)", f"${ingresos:,.2f}")
-            kpi2.metric("Gastos (Salidas)", f"${egresos:,.2f}", delta_color="inverse")
-            kpi3.metric("Balance Neto", f"${balance:,.2f}", delta=balance)
+            kpi1.metric("Ingresos", f"${ingresos:,.2f}")
+            kpi2.metric("Gastos", f"${egresos:,.2f}", delta_color="inverse")
+            kpi3.metric("Balance", f"${balance:,.2f}", delta=balance)
             
             st.divider()
 
-            # --- TABLA DETALLADA ---
-            st.dataframe(
-                df_filtrado[["fecha", "tipo", "categoria", "nota", "monto"]],
-                use_container_width=True,
-                column_config={
-                    "monto": st.column_config.NumberColumn("Monto", format="$ %.2f"),
-                    "fecha": st.column_config.DatetimeColumn("Fecha y Hora", format="DD/MM/YYYY HH:mm")
-                },
-                hide_index=True
-            )
+            # --- 5. TABLA EDITABLE (ACÁ ESTÁ LA MAGIA) ---
+            st.subheader("📝 Editar Movimientos")
+            st.warning("⚠️ OJO: Si borrás una Seña de acá, recordá corregir el saldo del Pedido manualmente en la otra pestaña.")
             
-            # --- RESUMEN FINAL ---
-            st.success(f"💰 **RESULTADO FINAL DEL PERÍODO:** En estas fechas te quedaron **${balance:,.2f}** de ganancia en el bolsillo.")
+            df_filtrado['Eliminar'] = False
+            
+            # Columnas a mostrar
+            df_editor = df_filtrado[['id', 'Eliminar', 'fecha', 'tipo', 'categoria', 'nota', 'monto']]
+
+            cambios = st.data_editor(
+                df_editor,
+                column_config={
+                    "id": st.column_config.NumberColumn(disabled=True, width="small"),
+                    "Eliminar": st.column_config.CheckboxColumn(help="Tildá para borrar este movimiento", default=False),
+                    "fecha": st.column_config.TextColumn("Fecha (YYYY-MM-DD)", disabled=False),
+                    "tipo": st.column_config.SelectboxColumn("Tipo", options=["Ingreso", "Egreso"], required=True),
+                    "categoria": st.column_config.SelectboxColumn("Categoría", options=["Seña", "Saldo Final", "Insumos", "Servicios", "Varios"], required=True),
+                    "monto": st.column_config.NumberColumn("Monto ($)", format="$ %.2f"),
+                    "nota": st.column_config.TextColumn("Detalle")
+                },
+                hide_index=True,
+                use_container_width=True,
+                key="editor_caja"
+            )
+
+            # --- BOTÓN GUARDAR ---
+            if st.button("💾 Guardar Correcciones en Caja"):
+                # 1. Borrar
+                filas_borrar = cambios[cambios['Eliminar'] == True]
+                for index, row in filas_borrar.iterrows():
+                    db.borrar_movimiento_caja(row['id'])
+                
+                # 2. Actualizar
+                filas_activas = cambios[cambios['Eliminar'] == False]
+                for index, row in filas_activas.iterrows():
+                    db.actualizar_movimiento_caja(
+                        row['id'], 
+                        row['fecha'], 
+                        row['tipo'], 
+                        row['categoria'], 
+                        row['monto'], 
+                        row['nota']
+                    )
+                
+                st.success("¡Caja actualizada correctamente!")
+                st.rerun()
+
+            st.success(f"💰 **GANANCIA DEL PERÍODO:** ${balance:,.2f}")
             
         else:
-            st.info("No hay movimientos registrados en esas fechas.")
-            
+            st.info("No hay movimientos en estas fechas.")
     else:
-        st.info("Aún no hay ningún movimiento en la caja histórica.")
+        st.info("La caja está vacía.")
 
     st.divider()
     
-    # Formulario rápido de gasto por si te olvidaste de cargar algo
+    # Formulario rápido
     with st.expander("Registrar Gasto Rápido (Manual)"):
         c1, c2, c3 = st.columns([2,2,1])
         monto = c1.number_input("Monto Gasto", 0.0)
@@ -354,6 +385,3 @@ elif menu == "📊 Caja y Movimientos":
         if c3.button("Cargar Salida"):
             db.registrar_movimiento_caja("Egreso", "Varios", monto, nota)
             st.rerun()
-
-
-
