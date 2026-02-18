@@ -1,5 +1,7 @@
 import streamlit as st
 import database as db
+import pandas as pd
+from datetime import datetime, timedelta 
 
 st.set_page_config(page_title="Imprenta Cloud", layout="wide", page_icon="☁️")
 
@@ -128,30 +130,95 @@ elif menu == "📦 Gestión de Pedidos":
                     st.rerun()
 
 # ==========================================
-# 5. CAJA
+# 5. CAJA Y MOVIMIENTOS (MEJORADO)
 # ==========================================
 elif menu == "📊 Caja y Movimientos":
-    st.header("Flujo de Caja")
-    periodo = st.radio("Ver:", ["Hoy", "Todo"])
+    st.header("📊 Reporte de Ganancias y Movimientos")
+
+    # --- 1. PREPARACIÓN DE DATOS ---
     df = db.obtener_caja()
     
     if not df.empty:
-        # Filtro simple
-        fecha_hoy = db.get_hora_argentina().split(" ")[0]
-        if periodo == "Hoy":
-            df = df[df['fecha'].str.contains(fecha_hoy)]
+        # Convertimos la columna de texto a formato Fecha real para poder filtrar
+        df['fecha_dt'] = pd.to_datetime(df['fecha'])
+        df['fecha_solo'] = df['fecha_dt'].dt.date 
+
+        # --- 2. FILTROS DE FECHA ---
+        col_filtro, col_rango = st.columns([1, 2])
+        
+        with col_filtro:
+            opcion_tiempo = st.selectbox(
+                "Seleccionar Período:", 
+                ["Hoy", "Últimos 7 Días", "Este Mes", "Rango Personalizado"]
+            )
+
+        # Definimos las fechas de inicio y fin según la opción
+        hoy = datetime.now().date()
+        fecha_inicio = hoy
+        fecha_fin = hoy
+
+        if opcion_tiempo == "Hoy":
+            fecha_inicio = hoy
+            fecha_fin = hoy
+        elif opcion_tiempo == "Últimos 7 Días":
+            fecha_inicio = hoy - timedelta(days=7)
+            fecha_fin = hoy
+        elif opcion_tiempo == "Este Mes":
+            fecha_inicio = hoy.replace(day=1)
+            fecha_fin = hoy
+        elif opcion_tiempo == "Rango Personalizado":
+            with col_rango:
+                rango = st.date_input("Elegí las fechas:", [hoy - timedelta(days=30), hoy])
+                if len(rango) == 2:
+                    fecha_inicio, fecha_fin = rango
+
+        # --- 3. APLICAR FILTRO ---
+        # Filtra el DataFrame "df" usando las fechas elegidas
+        mask = (df['fecha_solo'] >= fecha_inicio) & (df['fecha_solo'] <= fecha_fin)
+        df_filtrado = df.loc[mask]
+
+        # --- 4. CÁLCULOS DEL PERÍODO ---
+        if not df_filtrado.empty:
+            ingresos = df_filtrado[df_filtrado['tipo'] == 'Ingreso']['monto'].sum()
+            egresos = df_filtrado[df_filtrado['tipo'] == 'Egreso']['monto'].sum()
+            balance = ingresos - egresos
             
-        ingresos = df[df['tipo'] == 'Ingreso']['monto'].sum()
-        egresos = df[df['tipo'] == 'Egreso']['monto'].sum()
-        balance = ingresos - egresos
-        
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Ingresos (+)", f"${ingresos:,.2f}")
-        c2.metric("Egresos (-)", f"${egresos:,.2f}", delta_color="inverse")
-        c3.metric("Balance", f"${balance:,.2f}", delta=balance)
-        
-        st.divider()
-        st.markdown("### 📝 Detalle de Movimientos")
-        st.dataframe(df[["fecha", "tipo", "categoria", "nota", "monto"]], use_container_width=True)
+            # --- MOSTRAR MÉTRICAS ARRIBA ---
+            st.markdown(f"### 📅 Viendo desde: {fecha_inicio} hasta {fecha_fin}")
+            kpi1, kpi2, kpi3 = st.columns(3)
+            kpi1.metric("Ingresos (Ventas/Señas)", f"${ingresos:,.2f}")
+            kpi2.metric("Gastos (Salidas)", f"${egresos:,.2f}", delta_color="inverse")
+            kpi3.metric("Balance Neto", f"${balance:,.2f}", delta=balance)
+            
+            st.divider()
+
+            # --- TABLA DETALLADA ---
+            st.dataframe(
+                df_filtrado[["fecha", "tipo", "categoria", "nota", "monto"]],
+                use_container_width=True,
+                column_config={
+                    "monto": st.column_config.NumberColumn("Monto", format="$ %.2f"),
+                    "fecha": st.column_config.DatetimeColumn("Fecha y Hora", format="DD/MM/YYYY HH:mm")
+                },
+                hide_index=True
+            )
+            
+            # --- RESUMEN FINAL ---
+            st.success(f"💰 **RESULTADO FINAL DEL PERÍODO:** En estas fechas te quedaron **${balance:,.2f}** de ganancia en el bolsillo.")
+            
+        else:
+            st.info("No hay movimientos registrados en esas fechas.")
+            
     else:
-        st.info("No hay movimientos registrados.")
+        st.info("Aún no hay ningún movimiento en la caja histórica.")
+
+    st.divider()
+    
+    # Formulario rápido de gasto por si te olvidaste de cargar algo
+    with st.expander("Registrar Gasto Rápido (Manual)"):
+        c1, c2, c3 = st.columns([2,2,1])
+        monto = c1.number_input("Monto Gasto", 0.0)
+        nota = c2.text_input("Detalle")
+        if c3.button("Cargar Salida"):
+            db.registrar_movimiento_caja("Egreso", "Varios", monto, nota)
+            st.rerun()
