@@ -148,76 +148,119 @@ elif menu == "💸 Registrar Gasto":
                 st.error("El monto tiene que ser mayor a 0.")
 
 # ==========================================
-# 4. GESTIÓN PEDIDOS (EDITABLE)
+# 4. GESTIÓN PEDIDOS (HÍBRIDO: EDICIÓN + ACCIONES)
 # ==========================================
 elif menu == "📦 Gestión de Pedidos":
-    st.header("📋 Control de Trabajos (Editable)")
+    st.header("📋 Control de Trabajos")
     
-    # Filtros
+    # --- 1. FILTROS ---
     col_filtro, col_metricas = st.columns([1, 3])
     with col_filtro:
         filtro = st.radio("Ver:", ["Todos", "Pendientes", "Entregados"], horizontal=True)
     
-    # Obtener datos
     df = db.obtener_pedidos(filtro)
     
     if not df.empty:
-        # Preparamos la tabla para edición
-        df['Eliminar'] = False
-        
-        # Seleccionamos columnas ordenadas
-        df_editor = df[['id', 'Eliminar', 'fecha_creacion', 'cliente', 'descripcion', 'total', 'pagado', 'saldo', 'estado']]
+        # ========================================================
+        # SECCIÓN A: TABLA EDITABLE (PARA CORRECCIONES)
+        # ========================================================
+        with st.expander("📝 Modo Edición (Corregir errores de tipeo o precios)", expanded=False):
+            st.caption("Usá esto solo para corregir datos mal cargados. NO registra movimientos en caja.")
+            df['Eliminar'] = False
+            df_editor = df[['id', 'Eliminar', 'fecha_creacion', 'cliente', 'descripcion', 'total', 'pagado', 'saldo', 'estado']]
 
-        # --- TABLA INTERACTIVA ---
-        cambios = st.data_editor(
-            df_editor,
-            column_config={
-                "id": st.column_config.NumberColumn(disabled=True, width="small"),
-                "Eliminar": st.column_config.CheckboxColumn(help="Tildá para borrar", default=False),
-                "fecha_creacion": st.column_config.TextColumn("Fecha", disabled=True), # Fecha no se toca
-                "cliente": st.column_config.TextColumn("Cliente"),
-                "descripcion": st.column_config.TextColumn("Detalle", width="large"),
-                "total": st.column_config.NumberColumn("Total ($)", format="$ %.2f"),
-                "pagado": st.column_config.NumberColumn("Pagado ($)", format="$ %.2f"),
-                "saldo": st.column_config.NumberColumn("Debe (Saldo)", format="$ %.2f", disabled=True), # Se calcula solo
-                "estado": st.column_config.SelectboxColumn(
-                    "Estado",
-                    options=["Pendiente", "En Producción", "Terminado", "Entregado"],
-                    required=True
-                )
-            },
-            hide_index=True,
-            use_container_width=True,
-            key="editor_pedidos"
-        )
+            cambios = st.data_editor(
+                df_editor,
+                column_config={
+                    "id": st.column_config.NumberColumn(disabled=True, width="small"),
+                    "Eliminar": st.column_config.CheckboxColumn(default=False),
+                    "fecha_creacion": st.column_config.TextColumn("Fecha", disabled=True),
+                    "total": st.column_config.NumberColumn(format="$ %.2f"),
+                    "pagado": st.column_config.NumberColumn(format="$ %.2f"),
+                    "saldo": st.column_config.NumberColumn(format="$ %.2f", disabled=True),
+                    "estado": st.column_config.SelectboxColumn("Estado", options=["Pendiente", "En Producción", "Terminado", "Entregado"])
+                },
+                hide_index=True,
+                use_container_width=True,
+                key="editor_pedidos_hibrido"
+            )
 
-        # --- BOTÓN DE GUARDAR ---
-        st.caption("Nota: Si modificás 'Total' o 'Pagado', el saldo se recalculará automáticamente al guardar.")
+            if st.button("💾 Guardar Correcciones de la Tabla"):
+                # 1. Borrar
+                filas_borrar = cambios[cambios['Eliminar'] == True]
+                for index, row in filas_borrar.iterrows():
+                    db.borrar_pedido(row['id'])
+                
+                # 2. Actualizar (Sin tocar la caja, solo corrección de datos)
+                filas_activas = cambios[cambios['Eliminar'] == False]
+                for index, row in filas_activas.iterrows():
+                    # Usamos la función de update simple
+                    nuevo_saldo = row['total'] - row['pagado']
+                    # Llamada directa a Supabase para actualizar (o usá tu función de db si la tenés)
+                    db.actualizar_pedido_desde_tabla(row['id'], row['cliente'], row['descripcion'], row['total'], row['pagado'], row['estado'])
+                
+                st.success("¡Tabla corregida!")
+                st.rerun()
+
+        # ========================================================
+        # SECCIÓN B: PANEL DE ACCIONES (COBRAR Y ENTREGAR)
+        # ========================================================
+        st.divider()
+        st.subheader("🚀 Acciones Rápidas (Mueve Caja)")
+
+        # Selección del pedido
+        lista_pedidos = df.apply(lambda x: f"#{x['id']} - {x['cliente']} ({x['estado']})", axis=1).tolist()
+        seleccion_texto = st.selectbox("Seleccionar Pedido para Gestionar:", lista_pedidos)
         
-        if st.button("💾 Guardar Cambios en Pedidos"):
-            # 1. Borrar marcados
-            filas_borrar = cambios[cambios['Eliminar'] == True]
-            for index, row in filas_borrar.iterrows():
-                db.borrar_pedido(row['id'])
+        if seleccion_texto:
+            # Extraer el ID del texto seleccionado 
+            id_sel = int(seleccion_texto.split(" - ")[0].replace("#", ""))
+            pedido = df[df['id'] == id_sel].iloc[0]
+
+            col_info, col_acciones = st.columns([1, 2])
             
-            # 2. Actualizar modificados
-            filas_activas = cambios[cambios['Eliminar'] == False]
-            for index, row in filas_activas.iterrows():
-                # Actualiza usando la función nueva
-                db.actualizar_pedido_desde_tabla(
-                    row['id'], 
-                    row['cliente'], 
-                    row['descripcion'], 
-                    row['total'], 
-                    row['pagado'], 
-                    row['estado']
-                )
-            
-            st.success("¡Pedidos actualizados!")
-            st.rerun()
+            with col_info:
+                st.info(f"""
+                **Cliente:** {pedido['cliente']}  
+                **Total:** ${pedido['total']:,.2f}  
+                **Pagado:** ${pedido['pagado']:,.2f}  
+                **DEBE:** :red[${pedido['saldo']:,.2f}]
+                """)
+
+            with col_acciones:
+                c1, c2 = st.tabs(["💸 COBRAR SALDO", "📦 ENTREGAR"])
+                
+                # --- PESTAÑA 1: COBRAR ---
+                with c1:
+                    if pedido['saldo'] > 0:
+                        monto_a_cobrar = st.number_input("Monto que paga ahora ($):", min_value=0.0, max_value=float(pedido['saldo']), step=100.0)
+                        if st.button("💰 Registrar Pago y Mover Caja"):
+                            nuevo_pagado = pedido['pagado'] + monto_a_cobrar
+                            nuevo_saldo = pedido['total'] - nuevo_pagado
+                            
+                            # 1. Actualizar Pedido
+                            db.actualizar_pago_pedido(id_sel, nuevo_pagado, nuevo_saldo)
+                            
+                            # 2. Registrar en Caja
+                            db.registrar_movimiento_caja("Ingreso", "Saldo Final", monto_a_cobrar, f"Cobro pedido #{id_sel} - {pedido['cliente']}", id_sel)
+                            
+                            st.success("¡Pago registrado y caja actualizada!")
+                            st.rerun()
+                    else:
+                        st.success("✅ Este pedido ya está pagado completo.")
+
+                # --- PESTAÑA 2: ENTREGAR ---
+                with c2:
+                    st.write(f"Estado actual: **{pedido['estado']}**")
+                    nuevo_estado = st.selectbox("Cambiar estado a:", ["En Producción", "Terminado", "Entregado"], key="sel_estado_rapido")
+                    
+                    if st.button("🔄 Actualizar Estado"):
+                        db.actualizar_estado_pedido(id_sel, nuevo_estado)
+                        st.success(f"Estado cambiado a {nuevo_estado}")
+                        st.rerun()
 
     else:
-        st.info("No hay pedidos para mostrar con este filtro.")
+        st.info("No hay pedidos con este filtro.")
 # ==========================================
 # 5. CAJA Y MOVIMIENTOS (MEJORADO)
 # ==========================================
@@ -311,5 +354,6 @@ elif menu == "📊 Caja y Movimientos":
         if c3.button("Cargar Salida"):
             db.registrar_movimiento_caja("Egreso", "Varios", monto, nota)
             st.rerun()
+
 
 
