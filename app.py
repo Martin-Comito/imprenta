@@ -19,29 +19,78 @@ menu = st.sidebar.radio(
 )
 
 # ==========================================
-# 1. LISTA DE PRECIOS
+# 1. LISTA DE PRECIOS (EDITABLE)
 # ==========================================
 if menu == "💰 Lista de Precios":
-    st.header("Lista de Precios")
-    col1, col2 = st.columns([1, 2])
-    with col1:
+    st.header("Gestión de Precios")
+    
+    # --- A. FORMULARIO PARA AGREGAR NUEVOS ---
+    with st.expander("➕ Agregar Nuevo Producto", expanded=False):
         with st.form("nuevo_prod"):
-            nombre = st.text_input("Producto")
-            cant = st.number_input("Cantidad", 1, step=10, value=1000)
-            precio = st.number_input("Precio ($)", 0.0, step=100.0)
-            cat = st.selectbox("Categoría", ["Impresión", "Diseño", "Insumos"])
-            if st.form_submit_button("Guardar"):
+            c1, c2, c3, c4 = st.columns(4)
+            nombre = c1.text_input("Producto")
+            cant = c2.number_input("Cantidad", 1, step=10, value=1000)
+            precio = c3.number_input("Precio ($)", 0.0, step=100.0)
+            cat = c4.selectbox("Categoría", ["Impresión", "Diseño", "Insumos"])
+            
+            if st.form_submit_button("Guardar Nuevo"):
                 db.guardar_producto(nombre, cant, precio, cat)
-                st.success("Guardado!")
+                st.success("Agregado!")
                 st.rerun()
-    with col2:
-        df = db.obtener_productos()
-        if not df.empty:
-            st.dataframe(df[["nombre", "cantidad", "precio", "categoria"]], use_container_width=True)
-            id_borrar = st.number_input("ID a borrar", min_value=0)
-            if st.button("Borrar") and id_borrar > 0:
-                db.borrar_producto(id_borrar)
+
+    # --- B. TABLA EDITABLE ---
+    st.divider()
+    st.subheader("📝 Editar Precios Existentes")
+    
+    df = db.obtener_productos()
+    
+    if not df.empty:
+        # Agrega una columna "Eliminar" falsa para que aparezca el checkbox
+        df['Eliminar'] = False
+        
+        # Ordenamos las columnas para que quede prolijo
+        df_editor = df[['id', 'Eliminar', 'nombre', 'cantidad', 'precio', 'categoria']]
+
+        # Mostramos el editor (como un Excel)
+        cambios = st.data_editor(
+            df_editor,
+            column_config={
+                "id": st.column_config.NumberColumn(disabled=True), # El ID no se toca
+                "Eliminar": st.column_config.CheckboxColumn(help="Tildá para borrar este producto", default=False),
+                "precio": st.column_config.NumberColumn(format="$ %.2f"),
+                "cantidad": st.column_config.NumberColumn(format="%d u."),
+            },
+            hide_index=True,
+            use_container_width=True,
+            key="editor_precios" 
+        )
+
+        # Botón para guardar TODOS los cambios (Ediciones y Borrados)
+        if st.button("💾 Guardar Cambios en la Tabla"):
+            hay_cambios = False
+            
+            # 1. Detectar Borrados 
+            borrados = cambios[cambios['Eliminar'] == True]
+            for index, row in borrados.iterrows():
+                db.borrar_producto(row['id'])
+                hay_cambios = True
+            
+            # 2. Detectar Ediciones (Actualizamos todo lo que NO se borró)
+            # (Esto asegura que si cambiaste el precio, se guarde)
+            activos = cambios[cambios['Eliminar'] == False]
+            for index, row in activos.iterrows():
+                # Compara valores para no actualizar al cuete 
+                db.actualizar_producto(row['id'], row['nombre'], row['cantidad'], row['precio'], row['categoria'])
+                hay_cambios = True
+
+            if hay_cambios:
+                st.success("¡Base de datos actualizada!")
                 st.rerun()
+            else:
+                st.info("No detecté cambios para guardar.")
+                
+    else:
+        st.info("Todavía no hay productos cargados.")
 
 # ==========================================
 # 2. NUEVO PEDIDO
@@ -222,3 +271,4 @@ elif menu == "📊 Caja y Movimientos":
         if c3.button("Cargar Salida"):
             db.registrar_movimiento_caja("Egreso", "Varios", monto, nota)
             st.rerun()
+
