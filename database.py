@@ -92,3 +92,23 @@ def registrar_movimiento_caja(tipo, categoria, monto, nota, pedido_id=None):
     }
 
     supabase.table('caja').insert(datos).execute()
+
+# --- FUNCIONES DE EDICIÓN DE PEDIDOS ---
+def borrar_pedido(id_pedido):
+    """Borra un pedido definitivamente."""
+    supabase.table('pedidos').delete().eq('id', id_pedido).execute()
+
+def actualizar_pedido_desde_tabla(id_pedido, cliente, descripcion, total, pagado, estado):
+    """Actualiza datos y recalcula el saldo."""
+    # Recalcula el saldo para que siempre dé bien
+    saldo_nuevo = total - pagado
+    
+    datos = {
+        "cliente": cliente,
+        "descripcion": descripcion,
+        "total": total,
+        "pagado": pagado,
+        "saldo": saldo_nuevo,
+        "estado": estado
+    }
+    supabase.table('pedidos').update(datos).eq('id', id_pedido).execute()
