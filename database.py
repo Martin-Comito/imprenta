@@ -112,3 +112,19 @@ def actualizar_pedido_desde_tabla(id_pedido, cliente, descripcion, total, pagado
         "estado": estado
     }
     supabase.table('pedidos').update(datos).eq('id', id_pedido).execute()
+
+# --- FUNCIONES PARA EDITAR CAJA ---
+def borrar_movimiento_caja(id_movimiento):
+    """Borra un movimiento de la caja."""
+    supabase.table('caja').delete().eq('id', id_movimiento).execute()
+
+def actualizar_movimiento_caja(id_movimiento, fecha, tipo, categoria, monto, nota):
+    """Actualiza un movimiento existente (por si le erraste al monto)."""
+    datos = {
+        "fecha": fecha,
+        "tipo": tipo,
+        "categoria": categoria,
+        "monto": monto,
+        "nota": nota
+    }
+    supabase.table('caja').update(datos).eq('id', id_movimiento).execute()
